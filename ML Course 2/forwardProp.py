@@ -4,7 +4,7 @@ def g(x):
     return 1/(1+ np.exp(-x))
 
 def dense(input, w, b):
-    a=g(np.dot(input, w)+b)
+    a=g(np.matmul(input, w)+b)
     return a
         
 x = np.array([0.5, -1.2])
