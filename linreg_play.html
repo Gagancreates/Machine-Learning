@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Interactive Linear Regression</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+    }
+    .controls {
+      margin-bottom: 12px;
+    }
+    .plots {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+    .plot {
+      width: 900px;
+      height: 500px;
+    }
+    label{margin-right:10px}
+    button{padding:6px 10px; margin:2px;}
+    .weight-adjust button { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <h2>Linear Regression Playground (2D)</h2>
+  <div class="controls">
+    <label>Weight (w): 
+      <input type="range" id="weightSlider" min="-0.5" max="0.5" step="0.001" value="0">
+    </label>
+    <span id="weightVal">0</span>
+    <div class="weight-adjust">
+      Adjust: 
+      <button onclick="adjustWeight(0.1)">+0.1</button>
+      <button onclick="adjustWeight(0.01)">+0.01</button>
+      <button onclick="adjustWeight(0.001)">+0.001</button>
+      <button onclick="adjustWeight(-0.1)">-0.1</button>
+      <button onclick="adjustWeight(-0.01)">-0.01</button>
+      <button onclick="adjustWeight(-0.001)">-0.001</button>
+    </div>
+    <br>
+    <label>Bias (b): 
+      <input type="range" id="biasSlider" min="-100" max="100" step="0.1" value="0">
+    </label>
+    <span id="biasVal">0</span>
+    <br><br>
+    <button id="trainBtn">Train Model (≈10s)</button>
+    <button id="stopBtn" disabled>Stop</button>
+    <button id="resetBtn">Reset</button>
+    <span id="status" style="margin-left:16px"></span>
+  </div>
+
+  <div class="plots">
+    <div id="scatterPlot" class="plot"></div>
+    <div id="lossPlot" class="plot"></div>
+  </div>
+
+  <script>
+    // --- Data ---
+    const m = 100;
+    const X = Array.from({length: m}, () => Math.random() * 2000 + 500);
+    
+    
+    const trueW = 0.05;
+    const trueB = 50;
+    const Y = X.map(x => trueW * x + trueB + (Math.random() * 50 - 25));
+
+    // --- Model state ---
+    let w = 0;
+    let b = 0;
+
+    let learningRate = 8e-8;
+
+    let losses = [];
+    let epoch = 0;
+    let training = false;
+    const maxEpochs = 300;
+    const delay = 100;
+    const gradClip = 1e8;
+
+    function predict(x) { return w * x + b; }
+
+    function computeLoss() {
+      let total = 0;
+      for (let i = 0; i < m; i++) {
+        const e = predict(X[i]) - Y[i];
+        total += e * e;
+      }
+      return total / m;
+    }
+
+    function updatePlots(showCustom=false) {
+      const trace1 = {x: X, y: Y, mode: 'markers', type: 'scatter', name: 'Data', marker:{size:6}};
+      const lineX = [Math.min(...X), Math.max(...X)];
+      const lineY = lineX.map(x => predict(x));
+      const trace2 = {x: lineX, y: lineY, mode: 'lines', type: 'scatter', name: 'Model', line:{width:3,color:'red'}};
+      Plotly.react('scatterPlot', [trace1, trace2], {title: 'Housing Prices', xaxis: {title: 'Size (sq ft)'}, yaxis: {title: 'Price'}});
+
+      const traceLoss = {x: Array.from({length: losses.length}, (_, i) => i), y: losses, mode: 'lines+markers', name: 'Loss', line:{color:'green'}};
+      Plotly.react('lossPlot', [traceLoss], {title: 'Loss over Epochs', xaxis: {title: 'Epoch'}, yaxis: {title: 'MSE Loss'}});
+
+      const lastLoss = showCustom ? computeLoss() : (losses.length ? losses[losses.length-1] : computeLoss());
+      document.getElementById('status').innerText =
+        `${showCustom ? "Custom" : "Epoch: " + epoch} • Loss: ${lastLoss.toFixed(2)} • w: ${w.toFixed(4)} • b: ${b.toFixed(4)}`;
+    }
+
+    function trainStep() {
+      let dw = 0, db = 0;
+      for (let i = 0; i < m; i++) {
+        const err = predict(X[i]) - Y[i];
+        dw += err * X[i];
+        db += err;
+      }
+      dw /= m; db /= m;
+
+      if (!isFinite(dw) || !isFinite(db)) return {diverged:true};
+      dw = Math.max(Math.min(dw, gradClip), -gradClip);
+      db = Math.max(Math.min(db, gradClip), -gradClip);
+
+      w -= learningRate * dw;
+      b -= (learningRate*1e5) * db;
+      <!-- this is the code which can alter bias, 1e5 part-->
+
+      const loss = computeLoss();
+      if (!isFinite(loss) || isNaN(loss)) return {diverged:true};
+
+      losses.push(loss);
+      epoch += 1;
+      return {diverged:false, loss};
+    }
+
+    let trainTimer = null;
+    function startTraining() {
+      if (training) return;
+      training = true;
+      epoch = 0;
+      losses = [];
+      document.getElementById('trainBtn').disabled = true;
+      document.getElementById('stopBtn').disabled = false;
+      runEpoch();
+    }
+
+    function stopTraining() {
+      training = false;
+      document.getElementById('trainBtn').disabled = false;
+      document.getElementById('stopBtn').disabled = true;
+      if (trainTimer) { clearTimeout(trainTimer); trainTimer = null; }
+    }
+
+    function runEpoch() {
+      if (!training) return;
+      const res = trainStep();
+      if (res.diverged) {
+        stopTraining();
+        document.getElementById('status').innerText = 'Diverged — try smaller learning rate';
+        return;
+      }
+      updatePlots();
+
+      if (epoch < maxEpochs && training) {
+        trainTimer = setTimeout(runEpoch, delay);
+      } else {
+        stopTraining();
+      }
+    }
+
+    // --- UI wiring ---
+    document.getElementById('trainBtn').addEventListener('click', () => startTraining());
+    document.getElementById('stopBtn').addEventListener('click', () => stopTraining());
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      w = 0; b = 0; epoch = 0; losses = [];
+      document.getElementById('weightSlider').value = 0;
+      document.getElementById('biasSlider').value = 0;
+      document.getElementById('weightVal').innerText = w;
+      document.getElementById('biasVal').innerText = b;
+      updatePlots(true);
+    });
+
+    const wSlider = document.getElementById('weightSlider');
+    const bSlider = document.getElementById('biasSlider');
+    wSlider.addEventListener('input', (e) => { 
+      w = parseFloat(e.target.value); 
+      document.getElementById('weightVal').innerText = w; 
+      updatePlots(true); 
+    });
+    bSlider.addEventListener('input', (e) => { 
+      b = parseFloat(e.target.value); 
+      document.getElementById('biasVal').innerText = b; 
+      updatePlots(true); 
+    });
+
+    // helper: adjust weight by increments
+    function adjustWeight(delta) {
+      w = Math.max(-0.5, Math.min(0.5, w + delta));
+      document.getElementById('weightSlider').value = w;
+      document.getElementById('weightVal').innerText = w.toFixed(4);
+      updatePlots(true);
+    }
+
+    window.setLR = (val) => { learningRate = val; console.log('lr =', learningRate); };
+
+    losses.push(computeLoss());
+    updatePlots();
+  </script>
+</body>
+</html>
