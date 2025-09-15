@@ -122,7 +122,7 @@
       db = Math.max(Math.min(db, gradClip), -gradClip);
 
       w -= learningRate * dw;
-      b -= (learningRate*1e5) * db;
+      b -= (learningRate*9e5) * db;
       <!-- this is the code which can alter bias, 1e5 part-->
 
       const loss = computeLoss();
